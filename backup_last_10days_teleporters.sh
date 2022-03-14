@@ -10,4 +10,8 @@ rsync -avz --no-o --no-g -e 'ssh -i ~/.ssh/id_rsa' --delete \
 	/home/pi/pihole_teleporter_backups/ \
 	root@pfsense-rtr1:/mnt/usb_backup/pihole/.
 
+rsync -avz --no-o --no-g -e 'ssh -i ~/.ssh/id_rsa' --delete \
+	/home/pi/pihole_teleporter_backups/ \
+	slm@watcher:/export/raid1/data/backups/pihole/.
+
 # https://askubuntu.com/questions/476041/how-do-i-make-rsync-delete-files-that-have-been-deleted-from-the-source-folder
