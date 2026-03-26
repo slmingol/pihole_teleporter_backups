@@ -1,5 +1,25 @@
 # backup last 10 days worth of teleports to remote server
 
+## Secret Handling (Required Before Commit)
+
+`pihole_backup_and_sync.sh` reads `PIHOLE_PASSWORD` from environment or from a local file:
+
+`~/.config/pihole_backup.env`
+
+File contents should be:
+
+```
+PIHOLE_PASSWORD='your_pihole_password_here'
+```
+
+Protect it:
+
+```
+chmod 600 ~/.config/pihole_backup.env
+```
+
+Do not hardcode passwords in scripts.
+
 ## Setup
 
 ### mkdir
@@ -31,24 +51,18 @@ $ crontab -l
 #
 # m h  dom mon dow   command
 
-#26 22 * * * /home/pi/pihole_teleporter_backups/backup_last_10days_teleporters.sh >> /tmp/cron.log 2>&1
-00 22 * * * /home/pi/pihole_teleporter_backups/backup_last_10days_teleporters.sh
+00 22 * * * /home/pi/pihole_teleporter_backups/pihole_backup_and_sync.sh
 ```
 
-### Contents of script
-```
-$ more /home/pi/pihole_teleporter_backups/backup_last_10days_teleporters.sh
-#!/bin/bash
+### Run the script
 
-PATH="$PATH:/usr/sbin:/usr/local/bin/"
+Manual: `/home/pi/pihole_teleporter_backups/pihole_backup_and_sync.sh`
 
-pushd /home/pi/pihole_teleporter_backups > /dev/null 2>&1
-pihole -a -t
-sudo chown pi.pi *.gz
-find "/home/pi/pihole_teleporter_backups/" -maxdepth 1 -type f -mtime +10 -mtime -31 -name "*.gz" -ls -delete
-rsync -avz --no-o --no-g -e 'ssh -i ~/.ssh/id_rsa' --delete \
-	/home/pi/pihole_teleporter_backups/ \
-	root@pfsense-rtr1:/mnt/usb_backup/pihole/.
+Or automatically via cron at 10 PM daily (see crontab entry above).
 
-# https://askubuntu.com/questions/476041/how-do-i-make-rsync-delete-files-that-have-been-deleted-from-the-source-folder
-```
+The script:
+1. Backs up Pi-hole teleporter to `.zip` (v6) via REST API
+2. Checks/repairs pfSense mount if read-only (auto-fsck on FAT)
+3. Syncs to pfSense USB backup
+4. Syncs to ghost-files remote backup
+5. Retains last 10 days of backups locally
