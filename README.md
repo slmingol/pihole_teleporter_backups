@@ -1,24 +1,20 @@
-# backup last 10 days worth of teleports to remote server
+# Pi-hole Teleporter Backup & Sync
 
-## Secret Handling (Required Before Commit)
+Automatically backup Pi-hole configuration via teleporter API and sync to remote servers.
 
-`pihole_backup_and_sync.sh` reads `PIHOLE_PASSWORD` from environment or from a local file:
+## Configuration
 
-`~/.config/pihole_backup.env`
+### Pi-hole Password
 
-File contents should be:
+Create a secret file to store your Pi-hole admin password:
 
-```
-PIHOLE_PASSWORD='your_pihole_password_here'
-```
-
-Protect it:
-
-```
+```bash
+mkdir -p ~/.config
+printf "PIHOLE_PASSWORD='your_actual_pihole_password'\n" > ~/.config/pihole_backup.env
 chmod 600 ~/.config/pihole_backup.env
 ```
 
-Do not hardcode passwords in scripts.
+The script will automatically load the password from this file. Alternatively, you can set the `PIHOLE_PASSWORD` environment variable.
 
 ## Setup
 
@@ -43,7 +39,7 @@ $ crontab -e
 ....
 ```
 
-Crontab entry should look like this for 11pm daily
+Crontab entry should look like this for 10 PM daily:
 ```
 $ crontab -l
 ...
@@ -56,7 +52,15 @@ $ crontab -l
 
 ### Run the script
 
-Manual: `/home/pi/pihole_teleporter_backups/pihole_backup_and_sync.sh`
+Manual run:
+```bash
+/home/pi/pihole_teleporter_backups/pihole_backup_and_sync.sh
+```
+
+With verbose output:
+```bash
+/home/pi/pihole_teleporter_backups/pihole_backup_and_sync.sh --verbose
+```
 
 Or automatically via cron at 10 PM daily (see crontab entry above).
 
