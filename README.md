@@ -34,20 +34,20 @@ $ ssh-copy-id -i ~/.ssh/id_rsa root@pfsense-rtr1
 ```
 
 ### Add crontab entry for user `pi`
-```
-$ crontab -e
-....
+
+Edit crontab:
+```bash
+crontab -e
 ```
 
-Crontab entry should look like this for 10 PM daily:
+Add this line for daily execution at 10 PM:
 ```
-$ crontab -l
-...
- For more information see the manual pages of crontab(5) and cron(8)
-#
-# m h  dom mon dow   command
-
 00 22 * * * /home/pi/pihole_teleporter_backups/pihole_backup_and_sync.sh
+```
+
+Verify it's saved:
+```bash
+crontab -l
 ```
 
 ### Run the script
