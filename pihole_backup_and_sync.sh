@@ -13,7 +13,7 @@ PIHOLE_SECRET_FILE="${PIHOLE_SECRET_FILE:-$HOME/.config/pihole_backup.env}"
 BACKUP_DIR="/home/pi/pihole_teleporter_backups"
 BACKUP_FILE="$BACKUP_DIR/pihole_teleporter_$(date +%Y%m%d_%H%M%S).zip"
 
-PFSENSE_HOST="root@pfsense-rtr1"
+PFSENSE_HOST="admin@pfsense-rtr1"
 PFSENSE_MOUNT="/mnt/usb_backup"
 PFSENSE_FS_TYPE="msdosfs"
 
@@ -28,13 +28,33 @@ for arg in "$@"; do
   esac
 done
 
+# Colors
+COLOR_RESET="\033[0m"
+COLOR_CYAN="\033[0;36m"
+COLOR_GREEN="\033[0;32m"
+COLOR_RED="\033[0;31m"
+COLOR_YELLOW="\033[1;33m"
+COLOR_DIM="\033[2m"
+
 # Logging function
 log() {
-  printf "[%s] %s\n" "$(date +'%H:%M:%S')" "$*"
+  printf "${COLOR_DIM}[%s]${COLOR_RESET} %s\n" "$(date +'%H:%M:%S')" "$*"
+}
+
+log_step() {
+  printf "\n${COLOR_YELLOW}━━━ %s${COLOR_RESET}\n" "$*"
+}
+
+log_success() {
+  printf "    ${COLOR_GREEN}✓${COLOR_RESET} %s\n" "$*"
+}
+
+log_error() {
+  printf "    ${COLOR_RED}✗${COLOR_RESET} %s\n" "$*"
 }
 
 log_verbose() {
-  [ "$VERBOSE" = "1" ] && printf "  > %s\n" "$*" || true
+  [ "$VERBOSE" = "1" ] && printf "      ${COLOR_DIM}• %s${COLOR_RESET}\n" "$*" || true
 }
 
 # Load secret if not in environment
@@ -45,8 +65,14 @@ fi
 
 PIHOLE_PASSWORD="${PIHOLE_PASSWORD:-}"
 if [ -z "$PIHOLE_PASSWORD" ]; then
-  log "ERROR: PIHOLE_PASSWORD is not set."
-  log "Set it in env or in $PIHOLE_SECRET_FILE as: PIHOLE_PASSWORD='your_password'"
+  printf "\n${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
+  printf "${COLOR_RED}  ✗ Configuration Error${COLOR_RESET}\n"
+  printf "${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n\n"
+  printf "${COLOR_RED}ERROR:${COLOR_RESET} PIHOLE_PASSWORD is not set.\n\n"
+  printf "Set it in one of these ways:\n"
+  printf "  1. Run: ./setup_password.sh\n"
+  printf "  2. Set in $PIHOLE_SECRET_FILE as: PIHOLE_PASSWORD='your_password'\n"
+  printf "  3. Export as env var: export PIHOLE_PASSWORD='your_password'\n\n"
   exit 1
 fi
 
@@ -60,22 +86,27 @@ backup_pihole() {
   local base_url=""
   local sid=""
 
-  log "STEP 1/4: Backing up Pi-hole..."
+  log_step "STEP 1/4: Backing up Pi-hole"
 
-  for url in "http://$PIHOLE_HOST" "https://$PIHOLE_HOST"; do
+  # Try common Pi-hole ports (http:80, http:8080, https:443, https:4443)
+  for url in "http://$PIHOLE_HOST" "http://$PIHOLE_HOST:8080" "https://$PIHOLE_HOST" "https://$PIHOLE_HOST:4443"; do
     log_verbose "Trying auth at $url/api/auth ..."
     auth_json=$(printf '{"password":"%s"}' "$PIHOLE_PASSWORD" | curl -sS -k -m 15 -X POST "$url/api/auth" -H "Content-Type: application/json" --data-binary @- 2>/dev/null || true)
     sid=$(printf '%s' "$auth_json" | sed -n 's/.*"sid"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
     if [ -n "$sid" ]; then
       base_url="$url"
+      log_verbose "Connected successfully via $url"
       break
     fi
   done
 
   if [ -z "$sid" ]; then
-    log "ERROR: Failed to authenticate to Pi-hole API."
-    [ "$VERBOSE" = "1" ] && printf "Last response: %s\n" "${auth_json:-<empty>}" || true
-    log "Tip: verify PIHOLE_PASSWORD and that Pi-hole API is reachable on http/https localhost."
+    printf "\n${COLOR_RED}ERROR:${COLOR_RESET} Failed to authenticate to Pi-hole API.\n"
+    if [ "$VERBOSE" = "1" ]; then
+      printf "${COLOR_DIM}Last response: %s${COLOR_RESET}\n" "${auth_json:-<empty>}"
+    fi
+    printf "\n${COLOR_YELLOW}Tip:${COLOR_RESET} Verify PIHOLE_PASSWORD is correct and Pi-hole API is reachable.\n"
+    printf "     Check: sudo systemctl status pihole-FTL\n\n"
     return 1
   fi
 
@@ -92,7 +123,7 @@ backup_pihole() {
   log_verbose "Cleaning up backups older than 10 days..."
   find "$BACKUP_DIR" -maxdepth 1 -type f -mtime +10 -name "*.zip" -delete
 
-  log "✓ Backup complete: $(basename "$BACKUP_FILE")"
+  log_success "Backup saved: $(basename "$BACKUP_FILE")"
 }
 
 # ============================================================================
@@ -103,38 +134,46 @@ ensure_pfsense_rw_or_fail() {
   local mountpoint="${2:-$PFSENSE_MOUNT}"
   local fstype="${3:-$PFSENSE_FS_TYPE}"
 
-  log "STEP 2/4: Checking pfSense backup mount..."
+  log_step "STEP 2/4: Checking pfSense backup mount"
 
-  ssh -o BatchMode=yes "$host" "MNT='$mountpoint' FSTYPE='$fstype' VERBOSE='$VERBOSE' sh -s" <<'EOSH'
+  local result
+  if ! result=$(ssh -o BatchMode=yes "$host" "MNT='$mountpoint' FSTYPE='$fstype' VERBOSE='$VERBOSE' sh -s" 2>&1 <<'EOSH'
 set -eu
 
-LINE=$(mount | awk -v m="$MNT" '$3=="on" && $4==m {print; exit}')
+LINE=$(mount | awk -v m="$MNT" '$2=="on" && $3==m {print; exit}')
 if [ -z "$LINE" ]; then
-  echo "ERROR: mountpoint $MNT not found" >&2
+  echo "Mountpoint $MNT not found"
   exit 2
 fi
 
 DEV=$(printf '%s\n' "$LINE" | awk '{print $1}')
 
-if printf '%s\n' "$LINE" | grep -q 'read-only'; then
-  [ "$VERBOSE" = "1" ] && echo "  > Read-only detected, repairing $DEV ..." || echo "  > Repairing mount..."
+# Test if writable first
+PROBE="$MNT/.rw_probe_$$"
+if ! touch "$PROBE" 2>/dev/null; then
+  [ "$VERBOSE" = "1" ] && echo "Read-only detected, repairing $DEV ..." || true
   umount "$MNT"
   fsck_msdosfs -fy "$DEV" > /dev/null 2>&1
   mount -t "$FSTYPE" -o rw "$DEV" "$MNT"
+  
+  # Test again after repair
+  if ! touch "$PROBE" 2>/dev/null; then
+    echo "Still read-only after remount"
+    exit 3
+  fi
 fi
 
-PROBE="$MNT/.rw_probe_$$"
-touch "$PROBE"
 rm -f "$PROBE"
-
-mount | awk -v m="$MNT" '$3=="on" && $4==m {print; exit}' | grep -q 'read-only' && {
-  echo "ERROR: still read-only after remount" >&2
-  exit 3
-}
 
 echo "OK"
 EOSH
-  log "✓ Mount is writable"
+); then
+    log_error "Mount check failed: $result"
+    return 1
+  fi
+
+  log_verbose "Mount status: $result"
+  log_success "Mount is ready and writable"
 }
 
 # ============================================================================
@@ -152,41 +191,52 @@ sync_backups() {
 
   subdir_name=$(hostname | sed 's/-//g')
 
-  log "STEP 3/4: Syncing to pfSense backup..."
+  log_step "STEP 3/4: Syncing to pfSense backup"
   rsync $rsync_opts -e 'ssh -i ~/.ssh/id_rsa' \
     "$BACKUP_DIR/" \
     "$PFSENSE_HOST:$PFSENSE_MOUNT/$subdir_name/."
-  log "✓ pfSense sync complete"
+  log_success "Synced to pfSense"
 
-  log "STEP 4/4: Syncing to ghost-files backup..."
+  log_step "STEP 4/4: Syncing to ghost-files backup"
   rsync $rsync_opts -e 'ssh -i ~/.ssh/id_rsa' \
     "$BACKUP_DIR/" \
     "$GHOST_FILES_HOST:$GHOST_FILES_PATH/$subdir_name/."
-  log "✓ ghost-files sync complete"
+  log_success "Synced to ghost-files"
 }
 
 # ============================================================================
 # Main
 # ============================================================================
 main() {
-  log "Starting Pi-hole backup and sync (verbose=$VERBOSE)"
+  printf "\n${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
+  printf "${COLOR_CYAN}  Pi-hole Backup & Sync${COLOR_RESET}\n"
+  printf "${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
+  log "Started at $(date +'%Y-%m-%d %H:%M:%S')"
 
   if ! backup_pihole; then
-    log "ERROR: Pi-hole backup failed"
+    printf "\n${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
+    printf "${COLOR_RED}  ✗ Backup failed${COLOR_RESET}\n"
+    printf "${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n\n"
     return 1
   fi
 
   if ! ensure_pfsense_rw_or_fail; then
-    log "ERROR: pfSense mount check failed, skipping syncs"
+    printf "\n${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
+    printf "${COLOR_RED}  ✗ Mount check failed - skipping syncs${COLOR_RESET}\n"
+    printf "${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n\n"
     return 1
   fi
 
   if ! sync_backups; then
-    log "ERROR: Sync failed"
+    printf "\n${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
+    printf "${COLOR_RED}  ✗ Sync failed${COLOR_RESET}\n"
+    printf "${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n\n"
     return 1
   fi
 
-  log "✓ All done"
+  printf "\n${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n"
+  printf "${COLOR_GREEN}  ✓ All operations completed successfully${COLOR_RESET}\n"
+  printf "${COLOR_CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${COLOR_RESET}\n\n"
 }
 
 main "$@"
