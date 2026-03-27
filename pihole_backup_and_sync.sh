@@ -181,7 +181,7 @@ EOSH
 # ============================================================================
 sync_backups() {
   local subdir_name
-  local rsync_opts="-a --no-o --no-g --delete"
+  local rsync_opts="-a --no-o --no-g --delete --modify-window=2"
   
   if [ "$VERBOSE" = "1" ]; then
     rsync_opts="$rsync_opts -vv --progress --stats"
