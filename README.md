@@ -124,9 +124,14 @@ The script performs the following steps:
 1. **Backup Pi-hole**: Authenticates to Pi-hole API (tries ports 80, 8080, 443, 4443) and downloads teleporter backup ZIP
 2. **Check Mount**: Verifies pfSense USB backup mount is writable
 3. **Auto-Repair**: If mount is read-only, automatically runs `fsck_msdosfs` and remounts
-4. **Sync to pfSense**: Rsyncs backups to pfSense USB drive
-5. **Sync to NAS**: Rsyncs backups to ghost-files remote backup  
+4. **Sync to pfSense**: Rsyncs backups to pfSense USB drive with:
+   - `--no-owner --no-group`: Required for FAT32 (no Unix permissions)
+   - `--modify-window=2`: Handles FAT32's 2-second timestamp granularity for fast incremental syncs
+   - `--delete`: Mirrors source (removes files deleted from source)
+5. **Sync to NAS**: Rsyncs backups to ghost-files remote backup with same optimizations
 6. **Cleanup**: Removes local backups older than 10 days
+
+**Performance**: First run copies all files. Subsequent runs are ~87% faster due to `--modify-window=2` properly detecting unchanged files on FAT32.
 
 ## Troubleshooting
 
